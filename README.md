@@ -1,49 +1,54 @@
-# Kirman — MiMo Auto API tools
+# MiMo Auto API tools
 
-Tools buat pake **MiMo Auto** (Xiaomi's free AI model) lewat CLI atau OpenAI-compatible proxy.
+Tools buat pake **MiMo Auto**, model AI gratis dari Xiaomi, lewat CLI atau OpenAI-compatible proxy.
 
 ## Prerequisites
 
 - [Bun](https://bun.sh) runtime
-- [MiMo Code](https://mimocode.ai) (buat dapet fingerprint)
+- [MiMo Code](https://mimocode.ai) — sekali jalanin aja biar generate fingerprint
 
 ## Install
 
 ```bash
-# clone repo
-git clone <repo-url> kirman
-cd kirman
+git clone https://github.com/sukirman1901/mimo-reverse.git
+cd mimo-reverse
+```
 
-# pastiin fingerprint ada
+Cek fingerprint udah ada:
+
+```bash
 cat ~/.local/share/mimocode/mimo-free-client
-# kalo kosong, jalanin "mimo" dulu biar generate fingerprint
+```
+
+Kalo kosong, jalanin `mimo` dulu:
+
+```bash
+npx mimocode --version
+# atau kalo pake binary
+~/.mimocode/bin/mimo --version
 ```
 
 ## Usage
 
-### 1. CLI langsung
+### CLI
 
 ```bash
-./mimo "pertanyaan lu"
-./mimo stream "pertanyaan lu"   # streaming
-./mimo jwt                       # liat JWT token
+./mimo "pertanyaan kamu"
+./mimo stream "pertanyaan kamu"
+./mimo jwt
 ```
 
-### 2. OpenAI-compatible proxy
+### OpenAI-compatible proxy
 
 ```bash
 bun mimo-proxy.ts
 ```
-
-Proxy jalan di `http://localhost:8080/v1`.
 
 | Config | Value |
 |--------|-------|
 | Base URL | `http://localhost:8080/v1` |
 | API Key | `mimo-free` |
 | Model | `mimo-auto` |
-
-Contoh pake curl:
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -52,7 +57,7 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model":"mimo-auto","messages":[{"role":"user","content":"halo"}]}'
 ```
 
-Contoh pake OpenAI SDK:
+### OpenAI SDK
 
 ```js
 import OpenAI from "openai";
@@ -70,13 +75,11 @@ const chat = await client.chat.completions.create({
 
 | File | Fungsi |
 |------|--------|
-| `mimo` | CLI script buat chat langsung |
-| `mimo-proxy.ts` | OpenAI-compatible proxy server |
+| `mimo` | CLI script chat |
+| `mimo-proxy.ts` | Proxy OpenAI-compatible |
 
 ## How it works
 
-1. **Fingerprint** — `SHA256(hostname|os|cpu|username)`, disimpan di `~/.local/share/mimocode/mimo-free-client`
-2. **Bootstrap** — `POST /api/free-ai/bootstrap` dapetin JWT token (valid 1 jam)
-3. **Chat** — `POST /api/free-ai/openai/chat` pake `Authorization: Bearer <jwt>` + `X-Mimo-Source: mimocode-cli-free`
-
-> **Catatan:** Body chat WAJIB ada system prompt yang diawali `"You are MiMoCode, an interactive CLI tool that helps users with software engineering tasks."` — proxy handle ini otomatis.
+- **Fingerprint** — hash `SHA256(hostname|os|cpu|username)` dari mesin kamu
+- **Bootstrap** — `POST /api/free-ai/bootstrap` → dapet JWT (valid 1 jam)
+- **Chat** — pake `Authorization: Bearer <jwt>` + `X-Mimo-Source: mimocode-cli-free`
