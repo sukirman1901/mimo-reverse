@@ -1,0 +1,116 @@
+#!/bin/bash
+# MiMo Auto CLI
+set -uo pipefail
+
+CONFIG_DIR="${HOME}/.local/share/mimocode"
+FINGERPRINT_FILE="${CONFIG_DIR}/mimo-free-client"
+JWT_CACHE="${CONFIG_DIR}/.jwt"
+JWT_EXPIRY=3000
+
+bootstrap() {
+  local fingerprint
+  [ -f "$FINGERPRINT_FILE" ] || {
+    echo "Fingerprint not found. Run mimo binary first." >&2
+    exit 1
+  }
+  fingerprint=$(cat "$FINGERPRINT_FILE")
+  local resp jwt
+  resp=$(curl -s -X POST https://api.xiaomimimo.com/api/free-ai/bootstrap \
+    -H "content-type: application/json" \
+    -d "{\"client\":\"${fingerprint}\"}")
+  jwt=$(echo "$resp" | python3 -c "import sys,json;print(json.load(sys.stdin)['jwt'])" 2>/dev/null || true)
+  [ -n "$jwt" ] || { echo "Bootstrap failed: $resp" >&2; exit 1; }
+  echo "$jwt" > "$JWT_CACHE"
+  echo "$jwt"
+}
+
+get_jwt() {
+  if [ -f "$JWT_CACHE" ]; then
+    local jwt cached_time now
+    jwt=$(cat "$JWT_CACHE")
+    cached_time=$(stat -f %m "$JWT_CACHE" 2>/dev/null || echo 0)
+    now=$(date +%s)
+    [ $((now - cached_time)) -lt $JWT_EXPIRY ] && { echo "$jwt"; return; }
+  fi
+  bootstrap
+}
+
+mkjson() {
+  local prompt="$1" streaming="${2:-false}"
+  python3 - "$prompt" "$streaming" << 'PYEOF'
+import json, sys
+prompt = sys.argv[1]
+streaming = sys.argv[2] == 'true'
+body = {
+    'model': 'mimo-auto',
+    'max_tokens': 128000,
+    'messages': [
+        {'role': 'system', 'content': 'You are MiMoCode, an interactive CLI tool that helps users with software engineering tasks.'},
+        {'role': 'user', 'content': prompt}
+    ]
+}
+if streaming:
+    body['stream'] = True
+    body['stream_options'] = {'include_usage': True}
+print(json.dumps(body))
+PYEOF
+}
+
+parse_stream() {
+  python3 -c '
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if not line or line == "data: [DONE]": continue
+    if line.startswith("data: "):
+        try:
+            d = json.loads(line[6:])
+            c = d["choices"][0]["delta"].get("content")
+            if c is not None: print(c, end="", flush=True)
+        except: pass
+'
+}
+
+parse_nonstream() {
+  python3 -c '
+import sys, json
+text = sys.stdin.read()
+try:
+    d = json.loads(text)
+    print(d["choices"][0]["message"]["content"])
+except: pass
+'
+}
+
+JWT=$(get_jwt)
+
+case "${1:-}" in
+  stream )
+    shift
+    prompt="${*:-}"
+    [ -z "$prompt" ] && prompt=$(cat 2>/dev/null || true)
+    [ -z "$prompt" ] && { echo "Usage: mimo stream <prompt>" >&2; exit 1; }
+
+    curl -s --no-buffer https://api.xiaomimimo.com/api/free-ai/openai/chat \
+      -H "authorization: Bearer $JWT" \
+      -H "x-mimo-source: mimocode-cli-free" \
+      -H "content-type: application/json" \
+      -d "$(mkjson "$prompt" true)" | parse_stream
+    echo ""
+    ;;
+  jwt )
+    echo "$JWT"
+    ;;
+  * )
+    prompt="$*"
+    [ -z "$prompt" ] && prompt=$(cat 2>/dev/null || true)
+    [ -z "$prompt" ] && { echo "Usage: mimo <prompt> | mimo stream <prompt> | mimo jwt" >&2; exit 1; }
+
+    curl -s https://api.xiaomimimo.com/api/free-ai/openai/chat \
+      -H "authorization: Bearer $JWT" \
+      -H "x-mimo-source: mimocode-cli-free" \
+      -H "content-type: application/json" \
+      -d "$(mkjson "$prompt")" | parse_nonstream
+    echo ""
+    ;;
+esac
